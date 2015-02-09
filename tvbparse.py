@@ -13,46 +13,83 @@
 
 import urllib2
 from bs4 import BeautifulSoup
+import pickle
+import re
+import time
 
-page = urllib2.urlopen("http://zh.wikipedia.org/zh-hk/女人最痛").read()
-page = urllib2.urlopen("http://zh.wikipedia.org/zh-hk/老表，你好嘢！_(電視劇)").read()
 
-x = BeautifulSoup(page)
+# page = urllib2.urlopen("http://zh.wikipedia.org/zh-hk/女人最痛").read()
+# page = urllib2.urlopen("http://zh.wikipedia.org/zh-hk/老表，你好嘢！_(電視劇)").read()
 
-for i in x.find_all("table")[7].find_all("tr"):
-    if len(i.find_all("td")) != 2:
-        print i.find("td").get_text()
-g = x.find_all("table")
+# x = BeautifulSoup(page)
+
+# for i in x.find_all("table")[7].find_all("tr"):
+#     if len(i.find_all("td")) != 2:
+#         print i.find("td").get_text()
+# g = x.find_all("table")
 
 #print g[0].find_all("tr")[0].find("td") is None
 def checkActors(x):
     if x.find_all("tr")[0].find("td") is not None:
         #print "Good"
         return x.find_all("tr")[0].find("td").get_text() == "演員".decode('utf-8')
-#        return x.find_all("tr")[0].find("td").get_text() == u"演員"
+    elif x.find("tr").find("th") is not None:
+        return x.find("tr").find("th").get_text() == "演員".decode('utf-8')
     else:
         return False
 
 
-actorTabs = filter(checkActors, g)
+#actorTabs = filter(checkActors, g)
 
-def extractActors(actorTab):
+def simpleExtractActors(actorTab):
     res = []
-    for i in actorTab.find_all("tr"):
+    for i in actorTab.find_all("tr")[1:]:
         if len(i.find_all("td")) != 2:
             if i.find("td").get_text() != "演員".decode('utf-8'):
-                 res.append(i.find("td").get_text())
-        else:
-            if i.find("td").find("a"):
+                res.append(i.find("td").get_text())
+        elif len(i.find_all("td")) == 2 and i.find("td").find("a") is not None:
+            #print "b Branch"
+            #print i.find("td")
                 #print "find a, maybe actor"
                 # actor
+            res.append(i.find("td").get_text())
+    return res
+
+def hardExtractActors(actorTab):
+    res = []
+    n = checkActTabType(actorTab)
+    print "n"
+    print n
+    for i in actorTab.find_all("tr")[1:]:
+        #print len(i.find_all("td"))
+        if len(i.find_all("td")) != (n-1) and len(i.find_all("td")) != (n-2):
+            if i.find("td").get_text() != "":
                 res.append(i.find("td").get_text())
+                #print i.find("td").get_text()
+        elif len(i.find_all("td")) == (n-1) and i.find("td").find("a") is not None:
+            #print "b Branch"
+            #print i.find("td")
+                #print "find a, maybe actor"
+                # actor
+            res.append(i.find("td").get_text())
     return res
 
 
+def checkActTabType(actorTab):
+    firstrow = actorTab.find("tr")
+    if firstrow.find("th") is not None:
+        return len(firstrow.find_all("th"))
+    else:
+        return 3 #use simpleextractActors
 
-
-alla= reduce(lambda x, y: x+y, map(extractActors, actorTabs))
+def extractActors(actorTab):
+    if checkActTabType(actorTab) == 3:
+        res = simpleExtractActors(actorTab)
+    else:
+        res = hardExtractActors(actorTab)
+    return res
+        
+#alla= reduce(lambda x, y: x+y, map(extractActors, actorTabs))
 
 
 def extractInfobox(x):
@@ -69,11 +106,9 @@ def extractInfobox(x):
     return {"genre": genre, "noepi": noepi, "direct": direct}
 
 
-extractInfobox(x)
+#extractInfobox(x)
 
 
-import re
-import time
 
 def getalldrama(year):
     print year
@@ -94,13 +129,71 @@ def getalldrama(year):
             res.append({"type":g, "name": a.get_text(), "link": a['href'], "year": year})
     return res
 
-alldramas = reduce(lambda x, y: x+y, [getalldrama(year) for year in range(2004, 2015)])
+# alldramas = reduce(lambda x, y: x+y, [getalldrama(year) for year in range(2004, 2015)])
 
-#大長今
-#醫道
-# should be removed
+# #大長今
+# #醫道
+# # should be removed
 
-alldramas = [i for i in alldramas if i['name'] != "大長今".decode('utf-8') and i['name'] != "醫道".decode('utf-8')]
+# alldramas = [i for i in alldramas if i['name'] != "大長今".decode('utf-8') and i['name'] != "醫道".decode('utf-8')]
 
-import pickle
-pickle.dump(alldramas, open("alldramas.p", "wb"))
+# pickle.dump(alldramas, open("alldramas.p", "wb"))
+
+# #remove repetitive
+
+# cleandrama = []
+# dramaname = []
+
+# for drama in alldramas:
+#     if drama['name'] not in dramaname:
+#         dramaname.append(drama['name'])
+#         cleandrama.append(drama)
+
+#pickle.dump(cleandrama, open("cleandrama.p", "wb"))
+
+cleandrama = pickle.load(open("cleandrama.p", "rb"))
+
+
+def crawldrama(drama):
+    print drama['name']
+    link = re.sub("wiki", "zh-hk", drama['link'])
+    page = urllib2.urlopen("http://zh.wikipedia.org" + link).read()
+    time.sleep(3)
+    x = BeautifulSoup(page)
+    g = x.find_all("table")
+    actorTabs = filter(checkActors, g)
+    alla= reduce(lambda x, y: x+y, map(extractActors, actorTabs))
+    info = extractInfobox(x)
+    drama['info'] = info
+    drama['actors'] = alla
+    return drama
+
+alldata = []
+failed = []
+for drama in cleandrama:
+    try:
+        alldata.append(crawldrama(drama))
+    except:
+        print "Failed"
+        failed.append(drama)
+
+import csv
+
+csvfilename = '/home/chanch/tvbrank/alldata.csv'
+
+ofile = open(os.path.abspath(csvfilename), 'wb')
+writer = csv.writer(ofile)
+
+for drama in alldata:
+    for actor in drama['actors']:
+        writer.writerow([actor.encode('utf-8'), drama['name'].encode('utf-8'), drama['year'], drama['type'], drama['info']['genre'].encode('utf-8'), drama['info']['direct'].encode('utf-8'), drama['info']['noepi'].encode('utf-8')])
+
+ofile.close()
+
+# Failed dramas due to inconsistency in wiki format:
+#我師傅係黃飛鴻
+#老馮日記
+#天與地
+#使徒行者
+
+# alldata.csv still need a lot of works
